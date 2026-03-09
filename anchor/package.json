@@ -1,0 +1,15 @@
+{
+  "name": "ips-anchor-client",
+  "version": "1.0.0",
+  "description": "iBeacon BLE scanner anchor client for indoor positioning system",
+  "main": "anchor-client.js",
+  "scripts": {
+    "start": "node anchor-client.js"
+  },
+  "dependencies": {
+    "node-beacon-scanner": "^0.2.2",
+    "socket.io-client": "^4.7.2",
+    "dotenv": "^16.3.1"
+  },
+  "license": "MIT"
+}

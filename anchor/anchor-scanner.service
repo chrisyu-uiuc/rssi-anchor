@@ -1,0 +1,16 @@
+[Unit]
+Description=iBeacon Anchor Scanner Client
+After=bluetooth.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/anchor-client
+ExecStart=/usr/bin/node /home/pi/anchor-client/anchor-client.js
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/pi/anchor-client/.env
+
+[Install]
+WantedBy=multi-user.target
