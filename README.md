@@ -1,58 +1,81 @@
-# Indoor Positioning System — Real-Time iBeacon Fingerprinting
+# Indoor Positioning System — Real-Time Device-Free BLE Fingerprinting
 
-A distributed BLE indoor positioning system that uses RSSI fingerprinting to localize an iBeacon target in real time. Built on the same Weighted K-NN approach as the [UoG BLE Localization dataset](../README.md), adapted for a live deployment with Raspberry Pi anchor nodes and a central Mac server.
+A distributed BLE indoor positioning system that uses RSSI fingerprinting for device-free localization. 12+ fixed iBeacons broadcast throughout the area while 3-6 Raspberry Pi anchors measure signal strength from every beacon. A person walking through the area attenuates signals via body shadowing, creating unique RSSI patterns at each position. A central Mac server runs Weighted K-NN (ported from the [UoG BLE research](../README.md)) to predict position in real time.
+
+**Device-free** means the person carries nothing — all sensing is done by the fixed infrastructure.
 
 ## Architecture
 
 ```
-                        ┌──────────────┐
-                        │  iBeacon HW  │   Target to be localized
-                        │  (moves)     │   Broadcasts BLE advertisements
-                        └──────┬───────┘
-                               │  BLE signal received by all anchors
-          ┌────────┬───────────┼───────────┬────────┬────────┐
-          │        │           │           │        │        │
-       ┌──┴──┐ ┌──┴──┐    ┌──┴──┐    ┌──┴──┐ ┌──┴──┐ ┌──┴──┐
-       │ A1  │ │ A2  │    │ A3  │    │ A4  │ │ A5  │ │ A6  │
-       │ RPi │ │ RPi │    │ RPi │    │ RPi │ │ RPi │ │ RPi │
-       └──┬──┘ └──┬──┘    └──┬──┘    └──┬──┘ └──┬──┘ └──┬──┘
-          │        │          │          │        │        │
-          └────────┴──────────┼──────────┴────────┴────────┘
-                              │  WiFi (Socket.IO)
-                       ┌──────┴───────┐
-                       │  Mac Server  │   Central server
-                       │  Express +   │   Aggregates RSSI, runs KNN
-                       │  Socket.IO   │   Serves web dashboard
-                       └──────┬───────┘
-                              │
-                       ┌──────┴───────┐
-                       │  Dashboard   │   Real-time position on grid
-                       │  (Browser)   │   Training & localization UI
-                       └──────────────┘
+  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐        12 fixed iBeacons
+  │ B1  │ │ B2  │ │ B3  │ │ B4  │        placed throughout area
+  └──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘        constantly broadcasting
+     │BLE    │BLE    │BLE    │BLE
+     │       │       │       │            Person walks through area
+     │    ┌──┴──────┐│       │            Body shadows/attenuates
+     ├────│ Person  │├───────┤            specific beacon→anchor links
+     │    └─────────┘│       │
+     │       │       │       │
+  ┌──┴──┐ ┌─┴───┐ ┌┴────┐ ┌┴────┐       3-6 RPi anchors
+  │ A1  │ │ A2  │ │ A3  │ │ ... │       scan ALL beacons
+  │ RPi │ │ RPi │ │ RPi │ │ RPi │       report RSSI per beacon
+  └──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘
+     └────────┴───┬───┴───────┘
+                  │  WiFi (Socket.IO)
+           ┌──────┴───────┐
+           │  Mac Server  │   Aggregates anchor x beacon RSSI matrix
+           │  KNN Engine  │   Predicts (x,y) position
+           └──────┬───────┘
+                  │
+           ┌──────┴───────┐
+           │  Dashboard   │   Real-time position on grid
+           │  (Browser)   │   RSSI matrix heatmap
+           └──────────────┘
 ```
+
+## Feature Vector
+
+Each RPi anchor measures RSSI from every iBeacon. The full feature vector is the **anchor x beacon matrix**, flattened:
+
+```
+              B1    B2    B3    B4    B5   ...  B12    (12 beacons)
+  A1 RPi  [ -65   -72   -88   -70   -81  ...  -74 ]
+  A2 RPi  [ -78   -60   -71   -82   -66  ...  -80 ]
+  A3 RPi  [ -84   -81   -63   -76   -79  ...  -82 ]
+  ...
+  A6 RPi  [ -90   -77   -69   -83   -72  ...  -68 ]
+
+  Flattened → 72-element feature vector (6 anchors x 12 beacons)
+```
+
+When a person stands at a specific position, their body attenuates certain beacon-to-anchor paths, creating a unique RSSI pattern. With 72 features, the fingerprint is rich enough for sub-meter accuracy.
 
 ## Deployment Area
 
-490 x 490 cm open area with 6 anchors (4 corners + 2 midpoints):
+490 x 490 cm open area with anchors at edges + beacons distributed throughout:
 
 ```
-  A1(0,490) ─────── A5(245,490) ─────── A2(490,490)
-  │                                               │
-  │                                               │
-  │                490 x 490 cm                   │
-  │                                               │
-  │                                               │
-  A4(0,0) ──────── A6(245,0) ──────── A3(490,0)
+  A1 ─────────── A5 ─────────── A2      (RPi anchors at edges)
+  │  B9    B10    B11    B12     │
+  │                              │
+  │  B5     B6     B7     B8    A5      490 x 490 cm
+  │                              │
+  │  B1     B2     B3     B4     │
+  A4 ─────────── A6 ─────────── A3
+
+  Anchors: edges/corners          Beacons: spread throughout interior
 ```
 
 ## Hardware Requirements
 
 | Component | Quantity | Purpose |
 |---|---|---|
-| Raspberry Pi Zero 2W | 6 | Anchor scanner nodes |
-| Dedicated iBeacon | 1 | Target to localize (the thing that moves) |
+| Raspberry Pi Zero 2W | 3-6 | Anchor scanner nodes (fixed at edges) |
+| iBeacon hardware | 12-15 | Fixed reference beacons (spread throughout area) |
 | Mac laptop | 1 | Central server + dashboard |
-| WiFi network | 1 | All devices on the same network |
+| WiFi network | 1 | All RPis and Mac on same network |
+
+**The person being localized carries nothing.** All iBeacons and RPis are fixed infrastructure.
 
 ## Project Structure
 
@@ -132,7 +155,26 @@ Find your Mac's local IP (you'll need it for the anchors):
 ipconfig getifaddr en0
 ```
 
-### 3. Deploy to All 6 Raspberry Pis
+### 3. Place iBeacons
+
+Spread 12 iBeacons throughout the 490x490 cm area. Record each beacon's Minor ID and physical position. Update `server/config.js` with your actual beacon IDs and positions:
+
+```js
+BEACON_IDS: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+BEACON_POSITIONS: {
+  1:  { x: 0,   y: 0   },
+  2:  { x: 163, y: 0   },
+  // ... update to match your actual placement
+},
+```
+
+Placement tips:
+- Spread beacons evenly across the area (grid pattern works well)
+- Avoid clustering — maximize spatial diversity
+- Mount at consistent height (~1m above floor)
+- Ensure every position in the area is within range of at least 6-8 beacons
+
+### 4. Deploy to All Raspberry Pis
 
 From your Mac, run the deploy script for each anchor:
 
@@ -150,40 +192,47 @@ SERVER=http://192.168.x.x:3000
 ./deploy.sh rpi-a6.local  A6  245  0    $SERVER
 ```
 
-Replace `rpi-a1.local` etc. with the actual hostname or IP of each RPi.
+Replace `rpi-a1.local` etc. with the actual hostname or IP of each RPi. For a 3-anchor setup, deploy only A1-A3.
 
-Each RPi will automatically start scanning on boot via systemd.
+Each RPi will automatically start scanning all iBeacons on boot via systemd.
 
-### 4. Verify Connections
+### 5. Verify Connections
 
-Open the dashboard at `http://localhost:3000`. All 6 anchor cards should show green status dots.
+Open the dashboard at `http://localhost:3000`:
+- All anchor cards should show green status dots
+- The **RSSI matrix** should show values for each anchor x beacon pair (not all `--`)
+- If a cell shows `--`, that anchor can't see that beacon (check placement/range)
 
-### 5. Collect Training Data (Training Mode)
+### 6. Collect Training Data (Training Mode)
 
 1. The dashboard starts in **Training** mode
-2. Place the iBeacon at the first grid point shown on the canvas (highlighted in yellow)
-3. Click **Collect** — the system records RSSI from all 6 anchors for 10 seconds
-4. The point turns green when complete, and auto-advances to the next point
-5. Move the iBeacon to the next highlighted point and repeat
-6. With the default 70cm grid, there are **64 points** (~15 minutes total)
+2. Have a person **stand at the first grid point** shown on the canvas (highlighted in yellow)
+3. Click **Collect** — the system records the full RSSI matrix for 10 seconds
+4. The person's body attenuates specific beacon-to-anchor paths, creating a unique fingerprint
+5. The point turns green when complete, and auto-advances to the next point
+6. Person walks to the next highlighted point; click **Collect** again
+7. With the default 70cm grid, there are **64 points** (~15 minutes total)
 
-### 6. Real-Time Localization
+Important: the person must stand still at each point during collection. Their body position creates the fingerprint.
+
+### 7. Real-Time Localization
 
 1. Click the **Localization** toggle in the header
-2. Move the iBeacon anywhere in the 490x490 area
+2. Person walks freely through the 490x490 area (carrying nothing)
 3. The predicted position appears as a blue dot on the grid, updating every 2 seconds
 4. A trail shows the recent movement path
-5. Adjust **K** and **Sigma** parameters from the dashboard to tune accuracy
+5. The RSSI matrix updates in real-time showing signal attenuation patterns
+6. Adjust **K** and **Sigma** parameters from the dashboard to tune accuracy
 
 ## How It Works
 
-### Fingerprinting Approach
+### Device-Free Fingerprinting
 
-This system uses the same RSSI fingerprinting methodology as the UoG BLE research dataset:
+This system extends the UoG BLE fingerprinting methodology to device-free localization using radio tomographic imaging principles:
 
-1. **Training phase** — At each grid point, collect the average RSSI seen by each anchor. This creates a fingerprint: a 6-element vector `[rssi_A1, rssi_A2, ..., rssi_A6]` mapped to coordinates `(x, y)`.
+1. **Training phase** — A person stands at each grid point. Each RPi anchor measures RSSI from all 12 iBeacons. The person's body attenuates specific beacon-to-anchor links depending on their position. This creates a fingerprint: a 72-element vector (6 anchors x 12 beacons) mapped to coordinates `(x, y)`.
 
-2. **Localization phase** — When the iBeacon moves, all 6 anchors measure its RSSI. The server assembles a live feature vector, normalizes it with StandardScaler, and finds the K nearest training fingerprints using Euclidean distance. The predicted position is the Gaussian-weighted average of those K neighbors' coordinates.
+2. **Localization phase** — As the person moves, the RSSI attenuation pattern changes. The server assembles a live feature vector from all anchor x beacon readings, normalizes with StandardScaler, and runs Weighted K-NN to find the closest matching training fingerprint. The predicted position is the Gaussian-weighted average of the K nearest neighbors' coordinates.
 
 ### Weighted K-NN Algorithm
 
@@ -204,6 +253,9 @@ All system parameters are in `server/config.js`:
 
 | Parameter | Default | Description |
 |---|---|---|
+| `ANCHOR_IDS` | A1-A6 | RPi scanner node IDs |
+| `BEACON_IDS` | 1-12 | iBeacon Minor IDs (update to match your hardware) |
+| `BEACON_POSITIONS` | (see config) | Physical position of each iBeacon in cm |
 | `GRID.WIDTH` | 490 | Area width in cm |
 | `GRID.HEIGHT` | 490 | Area height in cm |
 | `GRID.SPACING` | 70 | Grid point spacing in cm (70cm = 8x8 = 64 points) |
@@ -211,8 +263,17 @@ All system parameters are in `server/config.js`:
 | `TRAINING_DURATION` | 10000 | Collection time per grid point in ms |
 | `KNN.K` | 3 | Number of nearest neighbors |
 | `KNN.SIGMA` | 1.0 | Gaussian kernel bandwidth |
-| `NO_SIGNAL_RSSI` | -100 | Default RSSI when an anchor has no reading |
+| `NO_SIGNAL_RSSI` | -100 | Default RSSI when anchor has no reading for a beacon |
 | `PORT` | 3000 | Server port |
+
+### Feature Vector Size
+
+| Anchors | Beacons | Features | Comparison |
+|---|---|---|---|
+| 3 | 12 | 36 | Exceeds UoG (15 features) |
+| 6 | 12 | 72 | Nearly 5x UoG |
+| 3 | 15 | 45 | 3x UoG |
+| 6 | 15 | 90 | 6x UoG |
 
 ### Grid Spacing Options
 
@@ -242,25 +303,28 @@ Set `TARGET_BEACON_UUID`, `TARGET_MAJOR`, or `TARGET_MINOR` to filter for a spec
 
 ### Fingerprint CSV
 
-Stored at `server/data/fingerprints/fingerprints.csv`:
+Stored at `server/data/fingerprints/fingerprints.csv`. Each row = one grid point, columns = anchor x beacon RSSI:
 
 ```csv
-x,y,rssi_A1,rssi_A2,rssi_A3,rssi_A4,rssi_A5,rssi_A6
-0,0,-65.2,-72.1,-88.3,-58.9,-70.4,-85.1
-0,70,-63.8,-74.5,-86.1,-60.2,-68.7,-83.4
+x,y,A1_B1,A1_B2,...,A1_B12,A2_B1,...,A6_B12
+0,0,-65.2,-72.1,...,-74.3,-78.5,...,-68.1
+0,70,-63.8,-74.5,...,-83.4,-60.2,...,-82.7
 ```
+
+72 RSSI columns for a 6-anchor x 12-beacon setup.
 
 ### Raw Readings
 
-Stored at `server/data/raw/{xxxyyy}_raw.csv` in UoG-compatible format:
+Stored at `server/data/raw/{xxxyyy}_raw.csv`:
 
 ```csv
-objloc,rss,time,anchor
-000000,-65,1709123456789,1
-000000,-72,1709123456790,2
+objloc,rss,time,anchor,beacon
+000000,-65,1709123456789,1,3
+000000,-72,1709123456790,2,3
+000000,-88,1709123456791,1,7
 ```
 
-Where `anchor` 1-6 maps to A1-A6.
+Where `anchor` 1-6 maps to A1-A6 and `beacon` is the iBeacon Minor ID.
 
 ## Managing Anchors
 
@@ -289,37 +353,36 @@ ssh pi@rpi-a1.local 'sudo systemctl stop anchor-scanner'
 | Server won't start | Run `npm install` in `server/`. Check port 3000 is not in use |
 | `node-beacon-scanner` fails on RPi | Ensure user is in bluetooth group: `sudo usermod -a -G bluetooth pi`, then reboot |
 
-## Running With Fewer Anchors (3-Anchor Setup)
+## Running With 3 Anchors
 
-The system works with as few as **3 anchors**. The KNN algorithm is dimension-agnostic — it computes distance over whatever feature vector length it receives (3 instead of 6). No code changes are needed, only a config edit.
+The system works with as few as **3 RPi anchors**. With 12 iBeacons, even 3 anchors give you a 36-element feature vector — more than double the UoG's 15 features.
 
-### 3 vs 6 Anchors
+### 3 vs 6 Anchors (with 12 beacons)
 
-| | 6 Anchors | 3 Anchors |
+| | 3 Anchors | 6 Anchors |
 |---|---|---|
-| Feature vector | 6-element RSSI | 3-element RSSI |
-| Spatial resolution | High | Lower — fewer unique RSSI signatures |
-| Dead zones | Minimal | Possible in center / far side |
-| Expected accuracy | ~0.3–0.5 m | ~0.7–1.5 m |
-| Hardware cost | 6 RPi Zero 2W | 3 RPi Zero 2W |
+| Feature vector | 36 (3 x 12) | 72 (6 x 12) |
+| vs UoG (15 features) | 2.4x richer | 4.8x richer |
+| Spatial diversity | Good | Excellent |
+| Hardware cost | 3x RPi (~$22) | 6x RPi (~$45) |
 
 ### Recommended 3-Anchor Placement
 
-Place them as a **triangle** for maximum angular separation. Avoid placing all 3 on the same wall.
+Triangle for maximum angular separation:
 
 ```
   A1(0,490) ──────────────────────── A2(490,490)
-  │                                            │
-  │                                            │
-  │               490 x 490 cm                 │
-  │                                            │
-  │                                            │
-  └──────────── A3(245,0) ────────────────────┘
+  │      B9    B10    B11    B12              │
+  │                                           │
+  │      B5     B6     B7     B8              │
+  │                                           │
+  │      B1     B2     B3     B4              │
+  └──────────── A3(245,0) ───────────────────┘
 ```
 
 ### Config Change
 
-Edit `server/config.js` — only the first two fields:
+Edit `server/config.js`:
 
 ```js
 ANCHOR_IDS: ['A1', 'A2', 'A3'],
@@ -330,7 +393,7 @@ ANCHOR_POSITIONS: {
 },
 ```
 
-Everything else (anchor manager, KNN, scaler, dashboard, fingerprint DB) adapts automatically because all modules read from `config.ANCHOR_IDS`. The dashboard will show 3 anchor cards, the canvas draws 3 anchors, fingerprints store 3 RSSI values, and KNN runs over 3-dimensional vectors.
+Everything adapts automatically — dashboard shows 3 anchor cards, fingerprints store 36 features, KNN runs over 36 dimensions.
 
 ### Deploy Only 3 RPis
 
@@ -342,34 +405,18 @@ SERVER=http://192.168.x.x:3000
 ./deploy.sh rpi-a3.local  A3  245  0    $SERVER
 ```
 
-### Tips to Compensate for Fewer Anchors
-
-- **Use the denser 49cm grid** (121 training points) instead of 70cm — more training data helps when features are fewer
-- **Increase K to 4 or 5** — averaging over more neighbors smooths noise from the smaller feature space
-- **Use longer training duration** (15–20 seconds per point) for more stable RSSI averages
-- **You can scale up later** — add more RPis at any time, update `config.js`, and re-collect training data
-
-### Fingerprint CSV With 3 Anchors
-
-The CSV automatically adjusts to 3 columns:
-
-```csv
-x,y,rssi_A1,rssi_A2,rssi_A3
-0,0,-65.2,-72.1,-88.3
-0,70,-63.8,-74.5,-86.1
-```
-
 > **Note:** Training data collected with 3 anchors is **not compatible** with a 6-anchor setup (different feature dimensions). If you add anchors later, you must re-collect all training data.
 
 ## Relation to UoG Dataset
 
-This system replicates the UoG BLE fingerprinting research approach:
+This system extends the UoG BLE fingerprinting approach to device-free localization:
 
 | Aspect | UoG Dataset | This System |
 |---|---|---|
-| Beacons/Anchors | 15 fixed BLE beacons | 6 RPi Zero 2W scanners |
-| Target | Phone (scans beacons) | Dedicated iBeacon hardware |
-| Direction | Phone scans fixed beacons | Fixed anchors scan mobile beacon |
+| Infrastructure | 15 fixed BLE beacons | 12 fixed iBeacons + 3-6 RPi scanners |
+| Target | Phone carried by person | Nothing — device-free (body shadowing) |
+| Features | 15 (1 per beacon) | 36-72 (anchors x beacons) |
+| Sensing | Phone scans fixed beacons | Fixed RPis scan fixed beacons |
 | Area | 430 x 120 cm corridor | 490 x 490 cm open area |
 | Algorithm | Weighted K-NN (Python) | Weighted K-NN (JS port) |
 | Data collection | Offline CSV files | Real-time via WiFi |

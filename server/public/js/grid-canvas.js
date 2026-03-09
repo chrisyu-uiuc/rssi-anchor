@@ -14,6 +14,7 @@ class GridCanvas {
 
     // Data
     this.anchors = {};
+    this.beacons = {};
     this.gridPoints = [];
     this.selectedPoint = null;
     this.position = null;
@@ -89,6 +90,9 @@ class GridCanvas {
     }
     if (cfg.anchors) {
       this.anchors = cfg.anchors;
+    }
+    if (cfg.beacons) {
+      this.beacons = cfg.beacons;
     }
     this._resize();
   }
@@ -204,6 +208,31 @@ class GridCanvas {
       ctx.font = `bold ${10 * this.scale}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillText(id, cx, cy - size);
+    }
+
+    // Draw fixed iBeacons
+    for (const [id, pos] of Object.entries(this.beacons)) {
+      const { cx, cy } = this._toCanvas(pos.x, pos.y);
+      const r = 5 * this.scale;
+
+      // Beacon diamond
+      ctx.fillStyle = '#aa44ff';
+      ctx.shadowColor = 'rgba(170, 68, 255, 0.3)';
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx + r, cy);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx - r, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Label
+      ctx.fillStyle = '#aa44ff';
+      ctx.font = `${8 * this.scale}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`B${id}`, cx, cy + r + 9 * this.scale);
     }
 
     // Draw position trail

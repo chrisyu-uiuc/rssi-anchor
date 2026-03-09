@@ -171,6 +171,7 @@ body {
 }
 
 .dot-anchor { background: #ff8800; }
+.dot-beacon { background: #aa44ff; }
 .dot-collected { background: #00ff88; }
 .dot-pending { background: #445566; }
 .dot-current { background: #ffdd00; }
@@ -383,6 +384,57 @@ body {
   color: #e0e8f0;
   font-size: 12px;
 }
+
+/* RSSI Matrix */
+.rssi-matrix {
+  font-size: 11px;
+  overflow-x: auto;
+}
+
+.rssi-matrix-row {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+.rssi-matrix-header {
+  position: sticky;
+  top: 0;
+}
+
+.rssi-matrix-label {
+  width: 28px;
+  min-width: 28px;
+  font-weight: 700;
+  color: #ff8800;
+  display: flex;
+  align-items: center;
+}
+
+.rssi-matrix-cell {
+  width: 32px;
+  min-width: 32px;
+  text-align: center;
+  padding: 3px 1px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.2);
+  color: #556677;
+  font-family: 'SF Mono', monospace;
+  font-size: 10px;
+}
+
+.header-cell {
+  color: #aa44ff;
+  font-weight: 600;
+  background: transparent;
+  font-size: 9px;
+}
+
+.rssi-none { color: #334455; }
+.rssi-strong { background: rgba(0, 255, 136, 0.2); color: #00ff88; }
+.rssi-good { background: rgba(255, 221, 0, 0.15); color: #ffdd00; }
+.rssi-weak { background: rgba(255, 136, 0, 0.15); color: #ff8800; }
+.rssi-very-weak { background: rgba(255, 68, 68, 0.15); color: #ff4444; }
 
 /* RSSI Monitor */
 .rssi-bars {

@@ -8,7 +8,7 @@ const RAW_DIR = path.join(DATA_DIR, 'raw');
 
 class FingerprintDB {
   constructor() {
-    // In-memory store: Map of "x,y" -> { x, y, rssi: number[6] }
+    // In-memory store: Map of "x,y" -> { x, y, rssi: number[anchors*beacons] }
     this.fingerprints = new Map();
     this._ensureDirs();
   }
@@ -31,10 +31,12 @@ class FingerprintDB {
 
   /**
    * Load fingerprint database from CSV.
-   * CSV format: x,y,rssi_A1,rssi_A2,rssi_A3,rssi_A4,rssi_A5,rssi_A6
+   * CSV format: x,y,A1_B1,A1_B2,...,A1_BN,A2_B1,...,AN_BN
+   * Feature count = ANCHOR_IDS.length × BEACON_IDS.length
    */
   load() {
     this.fingerprints.clear();
+    const expectedFeatures = config.ANCHOR_IDS.length * config.BEACON_IDS.length;
 
     if (!fs.existsSync(FINGERPRINT_FILE)) {
       return { count: 0 };
@@ -47,7 +49,7 @@ class FingerprintDB {
     // Skip header
     for (let i = 1; i < lines.length; i++) {
       const parts = lines[i].split(',').map(Number);
-      if (parts.length < 2 + config.ANCHOR_IDS.length) continue;
+      if (parts.length < 2 + expectedFeatures) continue;
 
       const x = parts[0];
       const y = parts[1];
@@ -63,7 +65,14 @@ class FingerprintDB {
    * Save all fingerprints to CSV.
    */
   save() {
-    const header = ['x', 'y', ...config.ANCHOR_IDS.map(id => `rssi_${id}`)].join(',');
+    // Header: x,y,A1_B1,A1_B2,...,A1_BN,A2_B1,...
+    const featureCols = [];
+    for (const aid of config.ANCHOR_IDS) {
+      for (const bid of config.BEACON_IDS) {
+        featureCols.push(`${aid}_B${bid}`);
+      }
+    }
+    const header = ['x', 'y', ...featureCols].join(',');
     const rows = [];
 
     for (const fp of this.fingerprints.values()) {
@@ -101,19 +110,19 @@ class FingerprintDB {
   }
 
   /**
-   * Save raw RSSI readings for a grid point (UoG-compatible format).
-   * Format: objloc,rss,time,anchor
-   * Where anchor is 1-indexed matching ANCHOR_IDS order.
+   * Save raw RSSI readings for a grid point.
+   * Format: objloc,rss,time,anchor,beacon
+   * Where anchor is 1-indexed matching ANCHOR_IDS order, beacon is iBeacon Minor ID.
    */
   saveRaw(x, y, readings) {
     const objloc = String(x).padStart(3, '0') + String(y).padStart(3, '0');
     const filename = `${objloc}_raw.csv`;
     const filepath = path.join(RAW_DIR, filename);
 
-    const header = 'objloc,rss,time,anchor\n';
+    const header = 'objloc,rss,time,anchor,beacon\n';
     const rows = readings.map(r => {
       const anchorIdx = config.ANCHOR_IDS.indexOf(r.anchorId) + 1;
-      return `${objloc},${Math.round(r.rssi)},${r.timestamp},${anchorIdx}`;
+      return `${objloc},${Math.round(r.rssi)},${r.timestamp},${anchorIdx},${r.beaconId}`;
     }).join('\n');
 
     fs.writeFileSync(filepath, header + rows + '\n');

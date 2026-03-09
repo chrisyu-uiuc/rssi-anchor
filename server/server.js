@@ -52,9 +52,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/config', (req, res) => {
   res.json({
     anchors: config.ANCHOR_POSITIONS,
+    beacons: config.BEACON_POSITIONS,
+    beaconIds: config.BEACON_IDS,
     grid: config.GRID,
     knn: config.KNN,
     anchorIds: config.ANCHOR_IDS,
+    featureSize: config.ANCHOR_IDS.length * config.BEACON_IDS.length,
   });
 });
 
@@ -71,13 +74,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('anchor:rssi', (data) => {
-    const { anchorId, rssi, timestamp, beaconMac, major, minor } = data;
-    anchorManager.addRssi(anchorId, rssi, timestamp);
+    const { anchorId, beaconId, rssi, timestamp, beaconMac, major, minor } = data;
+    anchorManager.addRssi(anchorId, beaconId, rssi, timestamp);
 
     // If training and collecting, also store raw reading
     if (mode === 'TRAINING' && trainingState.collecting) {
       trainingState.rawReadings.push({
         anchorId,
+        beaconId,
         rssi,
         timestamp,
         beaconMac,
@@ -195,14 +199,18 @@ function finishTrainingCollection() {
   const { x, y } = trainingState.point;
   const readings = trainingState.rawReadings;
 
-  // Compute average RSSI per anchor from all raw readings
-  const rssiVector = config.ANCHOR_IDS.map(id => {
-    const anchorReadings = readings.filter(r => r.anchorId === id);
-    if (anchorReadings.length > 0) {
-      return anchorReadings.reduce((sum, r) => sum + r.rssi, 0) / anchorReadings.length;
+  // Compute average RSSI per anchor per beacon (anchor × beacon matrix, flattened)
+  const rssiVector = [];
+  for (const aid of config.ANCHOR_IDS) {
+    for (const bid of config.BEACON_IDS) {
+      const matched = readings.filter(r => r.anchorId === aid && r.beaconId === bid);
+      if (matched.length > 0) {
+        rssiVector.push(matched.reduce((sum, r) => sum + r.rssi, 0) / matched.length);
+      } else {
+        rssiVector.push(config.NO_SIGNAL_RSSI);
+      }
     }
-    return config.NO_SIGNAL_RSSI;
-  });
+  }
 
   // Save fingerprint
   fingerprintDB.addFingerprint(x, y, rssiVector);
@@ -252,14 +260,10 @@ function initLocalization() {
 
 // --- Aggregation event handler ---
 aggregator.on('aggregated', (result) => {
-  const { vector, counts } = result;
+  const { vector, matrix, counts } = result;
 
-  // Broadcast raw RSSI for monitoring
-  const rssiMap = {};
-  config.ANCHOR_IDS.forEach((id, i) => {
-    rssiMap[id] = vector[i];
-  });
-  io.emit('dashboard:rssiUpdate', { rssi: rssiMap, counts });
+  // Broadcast RSSI matrix for monitoring (anchor -> beacon -> rssi)
+  io.emit('dashboard:rssiUpdate', { matrix, counts });
 
   // Training mode: accumulate vectors
   if (mode === 'TRAINING' && trainingState.collecting) {
@@ -290,7 +294,7 @@ aggregator.on('aggregated', (result) => {
       y: prediction.y,
       confidence: prediction.confidence,
       neighbors: prediction.neighbors,
-      rssi: rssiMap,
+      matrix,
       timestamp: Date.now(),
     });
   }
@@ -307,9 +311,13 @@ log(`Loaded ${loaded.count} existing fingerprints`);
 
 // --- Start ---
 server.listen(config.PORT, () => {
+  const featureSize = config.ANCHOR_IDS.length * config.BEACON_IDS.length;
   log(`Server running on port ${config.PORT}`);
   log(`Dashboard: http://localhost:${config.PORT}`);
   log(`Mode: ${mode}`);
+  log(`Anchors: ${config.ANCHOR_IDS.length} (${config.ANCHOR_IDS.join(', ')})`);
+  log(`Beacons: ${config.BEACON_IDS.length} (IDs: ${config.BEACON_IDS.join(', ')})`);
+  log(`Feature vector: ${config.ANCHOR_IDS.length} anchors x ${config.BEACON_IDS.length} beacons = ${featureSize} dimensions`);
   log(`Grid: ${config.GRID.WIDTH}x${config.GRID.HEIGHT}cm, spacing=${config.GRID.SPACING}cm`);
   log(`Expected grid points: ${fingerprintDB.getTotalGridPoints()}`);
   log(`KNN: k=${config.KNN.K}, sigma=${config.KNN.SIGMA}`);

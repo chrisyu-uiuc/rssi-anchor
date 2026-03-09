@@ -2,6 +2,7 @@ class RssiMonitor {
   constructor(socket) {
     this.socket = socket;
     this.anchorIds = [];
+    this.beaconIds = [];
 
     this.elAnchorGrid = document.getElementById('anchorGrid');
     this.elAnchorCount = document.getElementById('anchorCount');
@@ -11,10 +12,11 @@ class RssiMonitor {
     this.socket.on('dashboard:rssiUpdate', (data) => this._updateRssi(data));
   }
 
-  setAnchorIds(ids) {
-    this.anchorIds = ids;
+  setConfig(anchorIds, beaconIds) {
+    this.anchorIds = anchorIds;
+    this.beaconIds = beaconIds;
     this._buildAnchorCards();
-    this._buildRssiBars();
+    this._buildRssiMatrix();
   }
 
   _buildAnchorCards() {
@@ -34,20 +36,34 @@ class RssiMonitor {
     }
   }
 
-  _buildRssiBars() {
+  _buildRssiMatrix() {
     this.elRssiBars.innerHTML = '';
-    for (const id of this.anchorIds) {
-      const row = document.createElement('div');
-      row.className = 'rssi-row';
-      row.innerHTML = `
-        <span class="rssi-label">${id}</span>
-        <div class="rssi-bar-bg">
-          <div class="rssi-bar-fill" id="rssi-bar-${id}" style="width:0%"></div>
-        </div>
-        <span class="rssi-value" id="rssi-val-${id}">--</span>
-      `;
-      this.elRssiBars.appendChild(row);
+
+    // Build a compact matrix: rows = anchors, cols = beacons
+    const table = document.createElement('div');
+    table.className = 'rssi-matrix';
+
+    // Header row
+    const headerRow = document.createElement('div');
+    headerRow.className = 'rssi-matrix-row rssi-matrix-header';
+    headerRow.innerHTML = '<span class="rssi-matrix-label"></span>';
+    for (const bid of this.beaconIds) {
+      headerRow.innerHTML += `<span class="rssi-matrix-cell header-cell">B${bid}</span>`;
     }
+    table.appendChild(headerRow);
+
+    // Data rows (one per anchor)
+    for (const aid of this.anchorIds) {
+      const row = document.createElement('div');
+      row.className = 'rssi-matrix-row';
+      row.innerHTML = `<span class="rssi-matrix-label">${aid}</span>`;
+      for (const bid of this.beaconIds) {
+        row.innerHTML += `<span class="rssi-matrix-cell" id="rssi-${aid}-${bid}">--</span>`;
+      }
+      table.appendChild(row);
+    }
+
+    this.elRssiBars.appendChild(table);
   }
 
   _updateAnchors(statusList) {
@@ -55,7 +71,6 @@ class RssiMonitor {
 
     for (const s of statusList) {
       const card = document.getElementById(`anchor-card-${s.anchorId}`);
-      const statusDot = document.getElementById(`anchor-status-${s.anchorId}`);
       const posEl = document.getElementById(`anchor-pos-${s.anchorId}`);
 
       if (!card) continue;
@@ -76,38 +91,36 @@ class RssiMonitor {
   }
 
   _updateRssi(data) {
-    const { rssi } = data;
+    const { matrix } = data;
+    if (!matrix) return;
 
-    for (const id of this.anchorIds) {
-      const barEl = document.getElementById(`rssi-bar-${id}`);
-      const valEl = document.getElementById(`rssi-val-${id}`);
-      if (!barEl || !valEl) continue;
+    for (const aid of this.anchorIds) {
+      if (!matrix[aid]) continue;
+      for (const bid of this.beaconIds) {
+        const cell = document.getElementById(`rssi-${aid}-${bid}`);
+        if (!cell) continue;
 
-      const value = rssi[id];
+        const value = matrix[aid][bid];
 
-      if (value === undefined || value === null || value <= -100) {
-        barEl.style.width = '0%';
-        barEl.style.background = '#334455';
-        valEl.textContent = 'N/A';
-        continue;
+        if (value === undefined || value === null || value <= -100) {
+          cell.textContent = '--';
+          cell.className = 'rssi-matrix-cell rssi-none';
+          continue;
+        }
+
+        cell.textContent = Math.round(value);
+
+        // Color code by signal strength
+        if (value > -60) {
+          cell.className = 'rssi-matrix-cell rssi-strong';
+        } else if (value > -75) {
+          cell.className = 'rssi-matrix-cell rssi-good';
+        } else if (value > -90) {
+          cell.className = 'rssi-matrix-cell rssi-weak';
+        } else {
+          cell.className = 'rssi-matrix-cell rssi-very-weak';
+        }
       }
-
-      // Map RSSI from [-100, -30] to [0%, 100%]
-      const pct = Math.max(0, Math.min(100, ((value + 100) / 70) * 100));
-      barEl.style.width = `${pct}%`;
-
-      // Color: green (strong) -> yellow -> red (weak)
-      if (value > -60) {
-        barEl.style.background = 'linear-gradient(90deg, #00ff88, #44ff99)';
-      } else if (value > -75) {
-        barEl.style.background = 'linear-gradient(90deg, #ffdd00, #ffaa00)';
-      } else if (value > -90) {
-        barEl.style.background = 'linear-gradient(90deg, #ff8800, #ff6600)';
-      } else {
-        barEl.style.background = 'linear-gradient(90deg, #ff4444, #ff2222)';
-      }
-
-      valEl.textContent = `${Math.round(value)} dBm`;
     }
   }
 }

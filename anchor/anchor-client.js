@@ -81,6 +81,7 @@ scanner.onadvertisement = (ad) => {
 
   const payload = {
     anchorId: ANCHOR_ID,
+    beaconId: ad.iBeacon.minor,  // Minor value identifies each fixed iBeacon
     rssi: ad.rssi,
     timestamp: Date.now(),
     beaconMac: ad.address || 'Unknown',
@@ -92,7 +93,7 @@ scanner.onadvertisement = (ad) => {
     socket.emit('anchor:rssi', payload);
   }
 
-  log(`iBeacon RSSI: ${ad.rssi} dBm | MAC: ${payload.beaconMac} | Major: ${payload.major} Minor: ${payload.minor}`);
+  log(`iBeacon #${payload.beaconId} RSSI: ${ad.rssi} dBm | MAC: ${payload.beaconMac} | Major: ${payload.major} Minor: ${payload.minor}`);
 };
 
 const startScanning = () => {

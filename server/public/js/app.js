@@ -44,8 +44,8 @@ fetch('/api/config')
   .then(res => res.json())
   .then(cfg => {
     gridCanvas.setConfig(cfg);
-    rssiMonitor.setAnchorIds(cfg.anchorIds);
-    elGridInfo.textContent = `${cfg.grid.WIDTH} x ${cfg.grid.HEIGHT} cm (${cfg.grid.SPACING}cm grid)`;
+    rssiMonitor.setConfig(cfg.anchorIds, cfg.beaconIds);
+    elGridInfo.textContent = `${cfg.grid.WIDTH} x ${cfg.grid.HEIGHT} cm (${cfg.grid.SPACING}cm grid) | ${cfg.featureSize} features`;
     elKnnK.value = cfg.knn.K;
     elKnnSigma.value = cfg.knn.SIGMA;
   });
