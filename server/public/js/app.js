@@ -21,6 +21,8 @@ const elGridInfo = document.getElementById('gridInfo');
 const elKnnK = document.getElementById('knnK');
 const elKnnSigma = document.getElementById('knnSigma');
 const elBtnUpdateKnn = document.getElementById('btnUpdateKnn');
+const elAlgorithmSelect = document.getElementById('algorithmSelect');
+const elKnnParamsGroup = document.getElementById('knnParamsGroup');
 
 // State
 let currentMode = 'TRAINING';
@@ -48,6 +50,10 @@ fetch('/api/config')
     elGridInfo.textContent = `${cfg.grid.WIDTH} x ${cfg.grid.HEIGHT} cm (${cfg.grid.SPACING}cm grid) | ${cfg.featureSize} features`;
     elKnnK.value = cfg.knn.K;
     elKnnSigma.value = cfg.knn.SIGMA;
+    if (cfg.algorithm) {
+      elAlgorithmSelect.value = cfg.algorithm;
+      elKnnParamsGroup.style.display = cfg.algorithm === 'KNN' ? '' : 'none';
+    }
   });
 
 // --- Mode switching ---
@@ -115,6 +121,24 @@ elBtnUpdateKnn.addEventListener('click', () => {
   const sigma = parseFloat(elKnnSigma.value);
   if (k > 0 && sigma > 0) {
     socket.emit('config:update', { knnK: k, knnSigma: sigma });
+  }
+});
+
+// --- Algorithm selector ---
+elAlgorithmSelect.addEventListener('change', () => {
+  const algorithm = elAlgorithmSelect.value;
+  socket.emit('config:update', { algorithm });
+  elKnnParamsGroup.style.display = algorithm === 'KNN' ? '' : 'none';
+});
+
+socket.on('config:updated', (data) => {
+  if (data.algorithm) {
+    elAlgorithmSelect.value = data.algorithm;
+    elKnnParamsGroup.style.display = data.algorithm === 'KNN' ? '' : 'none';
+  }
+  if (data.knn) {
+    elKnnK.value = data.knn.K;
+    elKnnSigma.value = data.knn.SIGMA;
   }
 });
 

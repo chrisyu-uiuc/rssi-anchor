@@ -10,6 +10,7 @@ const RssiAggregator = require('./lib/rssi-aggregator');
 const FingerprintDB = require('./lib/fingerprint-db');
 const StandardScaler = require('./lib/standard-scaler');
 const { weightedKnn } = require('./lib/weighted-knn');
+const { GaussianNaiveBayes } = require('./lib/naive-bayes');
 
 // --- Initialize components ---
 const app = express();
@@ -42,6 +43,7 @@ let localizationState = {
   scaler: null,
   trainX: null,    // scaled training features
   trainY: null,    // training coordinates
+  naiveBayes: null, // fitted Gaussian NB classifier
   ready: false,
 };
 
@@ -56,6 +58,7 @@ app.get('/api/config', (req, res) => {
     beaconIds: config.BEACON_IDS,
     grid: config.GRID,
     knn: config.KNN,
+    algorithm: config.ALGORITHM,
     anchorIds: config.ANCHOR_IDS,
     featureSize: config.ANCHOR_IDS.length * config.BEACON_IDS.length,
   });
@@ -154,9 +157,13 @@ io.on('connection', (socket) => {
     if (data.gridSpacing) config.GRID.SPACING = data.gridSpacing;
     if (data.aggregationWindow) aggregator.setWindow(data.aggregationWindow);
     if (data.trainingDuration) config.TRAINING_DURATION = data.trainingDuration;
+    if (data.algorithm && (data.algorithm === 'KNN' || data.algorithm === 'NAIVE_BAYES')) {
+      config.ALGORITHM = data.algorithm;
+    }
     log(`Config updated: ${JSON.stringify(data)}`);
     io.emit('config:updated', {
       knn: config.KNN,
+      algorithm: config.ALGORITHM,
       grid: config.GRID,
       aggregationWindow: config.AGGREGATION_WINDOW,
       trainingDuration: config.TRAINING_DURATION,
@@ -247,15 +254,20 @@ function initLocalization() {
   const scaler = new StandardScaler();
   const scaledX = scaler.fitTransform(X);
 
+  // Fit Naive Bayes on raw (unscaled) RSSI
+  const naiveBayes = new GaussianNaiveBayes();
+  naiveBayes.fit(X, y);
+
   localizationState = {
     scaler,
     trainX: scaledX,
     trainY: y,
+    naiveBayes,
     ready: true,
   };
 
-  log(`Localization: initialized with ${X.length} fingerprints, k=${config.KNN.K}, sigma=${config.KNN.SIGMA}`);
-  io.emit('localization:ready', { fingerprintCount: X.length });
+  log(`Localization: initialized with ${X.length} fingerprints, algorithm=${config.ALGORITHM}, k=${config.KNN.K}, sigma=${config.KNN.SIGMA}`);
+  io.emit('localization:ready', { fingerprintCount: X.length, algorithm: config.ALGORITHM });
 }
 
 // --- Aggregation event handler ---
@@ -280,20 +292,27 @@ aggregator.on('aggregated', (result) => {
 
   // Localization mode: predict position
   if (mode === 'LOCALIZATION' && localizationState.ready) {
-    const scaled = localizationState.scaler.transform(vector);
-    const prediction = weightedKnn(
-      scaled,
-      localizationState.trainX,
-      localizationState.trainY,
-      config.KNN.K,
-      config.KNN.SIGMA
-    );
+    let prediction;
+
+    if (config.ALGORITHM === 'NAIVE_BAYES') {
+      prediction = localizationState.naiveBayes.predict(vector);
+    } else {
+      const scaled = localizationState.scaler.transform(vector);
+      prediction = weightedKnn(
+        scaled,
+        localizationState.trainX,
+        localizationState.trainY,
+        config.KNN.K,
+        config.KNN.SIGMA
+      );
+    }
 
     io.emit('dashboard:position', {
       x: prediction.x,
       y: prediction.y,
       confidence: prediction.confidence,
       neighbors: prediction.neighbors,
+      algorithm: config.ALGORITHM,
       matrix,
       timestamp: Date.now(),
     });

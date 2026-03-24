@@ -46,6 +46,9 @@ module.exports = {
   // Training mode
   TRAINING_DURATION: 10000,   // ms - collection time per grid point
 
+  // Algorithm selection: 'KNN' or 'NAIVE_BAYES'
+  ALGORITHM: 'KNN',
+
   // Weighted K-NN parameters
   KNN: {
     K: 3,
